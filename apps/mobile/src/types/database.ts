@@ -1,0 +1,20 @@
+// Re-export all types from the shared package
+export type {
+  MeetingType,
+  MeetingStatus,
+  LanguageCode,
+  NodeType,
+  EdgeRelation,
+  ActionItemPriority,
+  ActionItemStatus,
+  OrgRole,
+  Profile,
+  Meeting,
+  Transcript,
+  MeetingNote,
+  ActionItem,
+  Node,
+  Edge,
+  Organization,
+  OrganizationMember,
+} from '../../../packages/shared/types/database';

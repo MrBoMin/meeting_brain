@@ -1,0 +1,42 @@
+{
+  "app_name": "MeetingBrain",
+  "home": {
+    "title": "MeetingBrain",
+    "empty_title": "No meetings yet",
+    "empty_subtitle": "Tap the button below to record your first meeting",
+    "start_recording": "Start Recording",
+    "loading": "Loading meetings...",
+    "error": "Failed to load meetings",
+    "retry": "Retry"
+  },
+  "record": {
+    "title": "New Recording",
+    "placeholder_title": "Meeting title...",
+    "ready": "Ready to record",
+    "recording": "Recording in progress",
+    "tap_record": "Tap to record",
+    "tap_stop": "Tap to stop",
+    "language": "Language"
+  },
+  "meeting": {
+    "summary": "Summary",
+    "decisions": "Decisions",
+    "action_items": "Action Items",
+    "transcript": "Transcript",
+    "related": "Related Meetings"
+  },
+  "settings": {
+    "title": "Settings",
+    "language": "Language",
+    "account": "Account",
+    "notifications": "Notifications"
+  },
+  "common": {
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "loading": "Loading...",
+    "error": "Something went wrong",
+    "retry": "Retry"
+  }
+}

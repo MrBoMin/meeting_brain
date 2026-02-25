@@ -1,0 +1,102 @@
+# MeetingBrain — Cursor Project Rules
+
+## What This App Is
+MeetingBrain is a mobile meeting intelligence app (iOS + Android).
+It records meetings, transcribes them in Burmese and English,
+extracts structured notes using AI, and builds a knowledge graph
+that connects all meetings over time (Second Brain system).
+
+## Tech Stack
+- Mobile: React Native with Expo (TypeScript)
+- Backend: Supabase (Auth, PostgreSQL, Storage, Edge Functions, Realtime)
+- Transcription: Google Speech-to-Text V2 — model: chirp_3
+- AI: Claude API — model: claude-sonnet-4-6
+- Embeddings: OpenAI text-embedding-3-small
+- Vector Search: pgvector inside Supabase
+- Bot Server: Node.js + Puppeteer on Railway
+- Navigation: Expo Router (file-based)
+- Data Fetching: TanStack React Query
+
+## Hard Rules — Never Break These
+- Always TypeScript, never JavaScript
+- Never use "any" type
+- Never hardcode API keys
+- Audio sample rate: ALWAYS 16000 Hz
+- Default language: my-MM (Burmese)
+- All Supabase calls via apps/mobile/src/services/supabase.ts
+- Screens NEVER import supabase.ts directly — always use service files
+- All Edge Functions are Deno runtime (not Node.js)
+- Every screen handles: loading state, error state, empty state
+- Use TanStack React Query for ALL data fetching
+- All dates stored as UTC in Supabase
+
+## Database Tables
+profiles, meetings, transcripts, meeting_notes,
+nodes, edges, action_items
+(Full schema: packages/supabase/schema.sql)
+
+## Key Enums
+meeting.meeting_type: "in-person" | "online-bot"
+meeting.status: "recording" | "processing" | "done" | "failed"
+meeting.language_code: "my-MM" | "en-US" | "auto"
+node.node_type: "meeting" | "note" | "action" | "decision"
+edge.relation: "continues" | "references" | "contradicts" | "resolves"
+action_item.priority: "high" | "medium" | "low"
+action_item.status: "open" | "done" | "cancelled"
+
+## Folder Structure (mobile)
+app/                — Expo Router file-based routes
+src/screens/        — (legacy, migrated to app/)
+src/components/     — Reusable UI components
+src/hooks/          — Custom React hooks
+src/services/       — All API/Supabase calls (meetingService.ts, graphService.ts, etc.)
+src/types/          — TypeScript types (re-exports from packages/shared/)
+src/constants/      — Colors, languages, API config
+src/utils/          — Pure utility functions (formatDuration, formatDate, etc.)
+src/i18n/           — Language strings (en.json, my.json)
+
+## Monorepo Structure
+apps/mobile/        — Expo React Native app
+apps/bot-server/    — Node.js Puppeteer (Railway) [Phase 4]
+packages/shared/    — Shared TypeScript types
+packages/supabase/  — Schema, migrations, edge functions
+
+## Edge Functions (Supabase — Deno runtime)
+transcribe-meeting  — Google STT V2 integration
+analyze-meeting     — Claude API analysis
+link-to-graph       — pgvector semantic linking
+pre-meeting-brief   — Pre-meeting intelligence
+bot-callback        — Receives data from Railway bot
+
+## Screen Routes (Expo Router)
+/                   — HomeScreen (meeting list)
+/record             — RecordScreen (live recording)
+/processing/[id]    — ProcessingScreen (transcription progress)
+/meeting/[id]       — MeetingDetailScreen (full notes)
+/graph              — GraphScreen (knowledge visualization)
+/note/[id]          — NoteEditorScreen (manual notes)
+/search             — SearchScreen (semantic search)
+/brief/[meetingId]  — PreBriefScreen (pre-meeting intelligence)
+/settings           — SettingsScreen
+/onboarding         — OnboardingScreen (first-time setup)
+
+## File Naming Conventions
+- Screen routes: lowercase in app/ (e.g., record.tsx, settings.tsx)
+- Components: PascalCase (e.g., MeetingCard.tsx)
+- Hooks: camelCase + use prefix (e.g., useRecording.ts)
+- Services: camelCase + Service suffix (e.g., meetingService.ts)
+- Types: camelCase (e.g., database.ts) with PascalCase exports
+- Edge Functions: kebab-case folder (e.g., transcribe-meeting/index.ts)
+
+## Colors
+Primary: #6C63FF | Danger: #EF4444 | Success: #10B981
+Warning: #F59E0B | Background: #F8F9FA | Surface: #FFFFFF
+(All defined in src/constants/colors.ts)
+
+## DO NOT
+- Do not use class components — always functional
+- Do not use Redux — use React Query + local state
+- Do not use V1 Google STT API
+- Do not create separate CSS files — use StyleSheet.create()
+- Do not use expo-cli deprecated commands
+- Do not import supabase client directly in screens/components
