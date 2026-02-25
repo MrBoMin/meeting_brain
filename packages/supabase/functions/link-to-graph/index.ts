@@ -254,6 +254,13 @@ Deno.serve(async (req: Request) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     steps.push("ERROR: " + msg);
+    steps.push("Setting status to done (linking is best-effort)");
+    try {
+      await supabase
+        .from("meetings")
+        .update({ status: "done" })
+        .eq("id", meetingId);
+    } catch (_) {}
     return new Response(JSON.stringify({ error: msg, steps }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

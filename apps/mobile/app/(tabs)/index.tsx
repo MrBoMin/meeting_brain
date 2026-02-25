@@ -82,7 +82,12 @@ function MeetingCard({ item, onPress }: { item: Meeting; onPress: () => void }) 
         </View>
         <View style={styles.cardRight}>
           <Text style={styles.statusIcon}>{statusIcon}</Text>
-          <Text style={styles.durationText}>{formatDuration(item.duration_seconds)}</Text>
+          {item.duration_seconds ? (
+            <View style={styles.durationBadge}>
+              <Text style={styles.durationIcon}>🕐</Text>
+              <Text style={styles.durationText}>{formatDuration(item.duration_seconds)}</Text>
+            </View>
+          ) : null}
         </View>
       </View>
       {item.status !== 'done' && item.status !== 'failed' && (
@@ -696,10 +701,22 @@ const styles = StyleSheet.create({
   statusIcon: {
     fontSize: 18,
   },
+  durationBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.primarySoft,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    gap: 3,
+  },
+  durationIcon: {
+    fontSize: 10,
+  },
   durationText: {
-    fontSize: 12,
-    color: Colors.textMuted,
-    fontWeight: '600',
+    fontSize: 11,
+    color: Colors.primary,
+    fontWeight: '700',
   },
   cardProgress: {
     marginTop: 14,

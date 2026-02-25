@@ -33,12 +33,15 @@ export async function uploadMeetingAudio(
   return storagePath;
 }
 
-export async function triggerTranscription(meetingId: string): Promise<void> {
+async function callEdgeFunction(
+  functionName: string,
+  meetingId: string,
+  maxRetries = 3,
+): Promise<boolean> {
   const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
   const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
-  const url = `${supabaseUrl}/functions/v1/transcribe-meeting`;
+  const url = `${supabaseUrl}/functions/v1/${functionName}`;
 
-  const maxRetries = 3;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const res = await fetch(url, {
@@ -52,89 +55,43 @@ export async function triggerTranscription(meetingId: string): Promise<void> {
       });
 
       const text = await res.text();
-      console.log(`Transcription response (${res.status}):`, text);
+      console.log(`${functionName} response (${res.status}):`, text);
 
-      if (res.ok) return;
+      if (res.ok) return true;
 
-      console.warn(`Transcription attempt ${attempt}/${maxRetries} failed (${res.status}):`, text);
-    } catch (e: any) {
-      console.warn(`Transcription attempt ${attempt}/${maxRetries} network error:`, e.message);
+      console.warn(`${functionName} attempt ${attempt}/${maxRetries} failed (${res.status}):`, text);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn(`${functionName} attempt ${attempt}/${maxRetries} network error:`, msg);
     }
 
     if (attempt < maxRetries) {
       await new Promise((r) => setTimeout(r, 2000 * attempt));
     }
   }
-  console.warn('All transcription attempts failed, processing screen will poll for status');
+  console.warn(`All ${functionName} attempts failed`);
+  return false;
+}
+
+export async function triggerTranscription(meetingId: string): Promise<void> {
+  const ok = await callEdgeFunction('transcribe-meeting', meetingId);
+  if (!ok) {
+    await updateMeetingStatus(meetingId, 'failed');
+  }
 }
 
 export async function triggerAnalysis(meetingId: string): Promise<void> {
-  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
-  const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
-  const url = `${supabaseUrl}/functions/v1/analyze-meeting`;
-
-  const maxRetries = 3;
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabaseAnonKey}`,
-          'apikey': supabaseAnonKey,
-        },
-        body: JSON.stringify({ meeting_id: meetingId }),
-      });
-
-      const text = await res.text();
-      console.log(`Analysis response (${res.status}):`, text);
-
-      if (res.ok) return;
-
-      console.warn(`Analysis attempt ${attempt}/${maxRetries} failed (${res.status}):`, text);
-    } catch (e: any) {
-      console.warn(`Analysis attempt ${attempt}/${maxRetries} network error:`, e.message);
-    }
-
-    if (attempt < maxRetries) {
-      await new Promise((r) => setTimeout(r, 2000 * attempt));
-    }
+  const ok = await callEdgeFunction('analyze-meeting', meetingId);
+  if (!ok) {
+    console.warn('Analysis failed, skipping to done');
+    await updateMeetingStatus(meetingId, 'done');
   }
-  console.warn('All analysis attempts failed');
 }
 
 export async function triggerLinking(meetingId: string): Promise<void> {
-  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
-  const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
-  const url = `${supabaseUrl}/functions/v1/link-to-graph`;
-
-  const maxRetries = 3;
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabaseAnonKey}`,
-          'apikey': supabaseAnonKey,
-        },
-        body: JSON.stringify({ meeting_id: meetingId }),
-      });
-
-      const text = await res.text();
-      console.log(`Linking response (${res.status}):`, text);
-
-      if (res.ok) return;
-
-      console.warn(`Linking attempt ${attempt}/${maxRetries} failed (${res.status}):`, text);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.warn(`Linking attempt ${attempt}/${maxRetries} network error:`, msg);
-    }
-
-    if (attempt < maxRetries) {
-      await new Promise((r) => setTimeout(r, 2000 * attempt));
-    }
+  const ok = await callEdgeFunction('link-to-graph', meetingId);
+  if (!ok) {
+    console.warn('Linking failed, skipping to done');
+    await updateMeetingStatus(meetingId, 'done');
   }
-  console.warn('All linking attempts failed');
 }

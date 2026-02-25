@@ -18,7 +18,7 @@ import { formatTimer } from '../../src/utils/format';
 import { useRecording } from '../../src/hooks/useRecording';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useOrganization } from '../../src/contexts/OrganizationContext';
-import { createMeeting } from '../../src/services/meetingService';
+import { createMeeting, updateMeetingStatus } from '../../src/services/meetingService';
 import { uploadMeetingAudio } from '../../src/services/storageService';
 import type { LanguageCode } from '../../src/types/database';
 
@@ -140,6 +140,11 @@ export default function RecordScreen() {
       } catch (e: any) {
         throw new Error(`Upload audio failed: ${e?.message ?? JSON.stringify(e)}`);
       }
+
+      await updateMeetingStatus(meeting.id, 'processing', {
+        duration_seconds: durationSeconds,
+        ended_at: new Date().toISOString(),
+      });
 
       router.replace(`/processing/${meeting.id}`);
     } catch (err: any) {

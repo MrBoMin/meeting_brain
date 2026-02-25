@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { getMeetingById } from '../../src/services/meetingService';
+import { getMeetingById, updateMeetingStatus } from '../../src/services/meetingService';
 import { triggerTranscription, triggerAnalysis, triggerLinking } from '../../src/services/storageService';
 import { Colors } from '../../src/constants/colors';
 import { shadow1, shadow2 } from '../../src/constants/shadows';
@@ -71,12 +71,17 @@ function StepIndicator({ status }: { status: MeetingStatus }) {
   );
 }
 
+const STALE_TIMEOUT_MS = 3 * 60 * 1000;
+
 export default function ProcessingScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const transcriptionTriggered = useRef(false);
   const analysisTriggered = useRef(false);
   const linkingTriggered = useRef(false);
+  const statusEnteredAt = useRef<number>(Date.now());
+  const lastStatus = useRef<string>('');
+  const [isStale, setIsStale] = useState(false);
 
   const { data: meeting, error } = useQuery({
     queryKey: ['meeting', id],
@@ -136,6 +141,36 @@ export default function ProcessingScreen() {
       doLink();
     }
   }, [meeting?.status, doLink]);
+
+  useEffect(() => {
+    const currentStatus = meeting?.status ?? '';
+    if (currentStatus && currentStatus !== lastStatus.current) {
+      lastStatus.current = currentStatus;
+      statusEnteredAt.current = Date.now();
+      setIsStale(false);
+    }
+  }, [meeting?.status]);
+
+  useEffect(() => {
+    const status = meeting?.status;
+    if (!status || status === 'done' || status === 'failed') return;
+
+    const interval = setInterval(() => {
+      if (Date.now() - statusEnteredAt.current > STALE_TIMEOUT_MS) {
+        setIsStale(true);
+      }
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [meeting?.status]);
+
+  const handleSkipToDone = useCallback(async () => {
+    if (!id) return;
+    try {
+      await updateMeetingStatus(id, 'done');
+    } catch {
+      console.warn('Failed to force done');
+    }
+  }, [id]);
 
   useEffect(() => {
     if (meeting?.status === 'done') {
@@ -217,6 +252,18 @@ export default function ProcessingScreen() {
                 onPress={() => router.replace('/')}
               >
                 <Text style={styles.secondaryText}>Go Home</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {isStale && status !== 'done' && status !== 'failed' && (
+            <View style={styles.staleActions}>
+              <Text style={styles.staleHint}>
+                This step is taking longer than expected.{'\n'}
+                You can skip ahead — your transcript and analysis are safe.
+              </Text>
+              <TouchableOpacity style={styles.button} onPress={handleSkipToDone}>
+                <Text style={styles.buttonText}>Skip to Done</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -369,6 +416,18 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontSize: 16,
     fontWeight: '600',
+  },
+  staleActions: {
+    alignItems: 'center',
+    marginTop: 20,
+    gap: 12,
+  },
+  staleHint: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 4,
   },
   errorText: {
     fontSize: 13,
