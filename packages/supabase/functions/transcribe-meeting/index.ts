@@ -42,39 +42,113 @@ Deno.serve(async (req: Request) => {
     if (!meeting.audio_path) throw new Error("No audio uploaded");
     steps.push("   audio: " + meeting.audio_path);
 
-    steps.push("2. Downloading audio");
+    steps.push("2. Downloading audio from storage");
     const { data: audioBlob, error: dlErr } = await supabase.storage
       .from("meeting-audio")
       .download(meeting.audio_path);
     if (dlErr || !audioBlob) throw new Error("Download failed: " + dlErr?.message);
 
     const audioBytes = new Uint8Array(await audioBlob.arrayBuffer());
-    steps.push("   Size: " + audioBytes.length + " bytes");
+    const fileSizeMB = (audioBytes.length / (1024 * 1024)).toFixed(2);
+    steps.push("   Size: " + audioBytes.length + " bytes (" + fileSizeMB + " MB)");
 
-    let bin = "";
-    for (let i = 0; i < audioBytes.length; i += 8192) {
-      bin += String.fromCharCode.apply(null, Array.from(audioBytes.subarray(i, i + 8192)));
-    }
-    const audioBase64 = btoa(bin);
-
-    steps.push("3. Calling Gemini");
     const mime = meeting.audio_path.endsWith(".wav") ? "audio/wav" : "audio/mp4";
     const lang = meeting.language_code === "my-MM" ? "Burmese" :
                  meeting.language_code === "en-US" ? "English" : meeting.language_code;
 
-    const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + geminiKey;
+    let fileUri: string | null = null;
+    let audioBase64: string | null = null;
 
-    const res = await fetch(url, {
+    // Use File API for files > 4MB, inline for smaller
+    if (audioBytes.length > 4 * 1024 * 1024) {
+      steps.push("3. Uploading to Gemini File API (large file)");
+
+      // Step 1: Start resumable upload
+      const startRes = await fetch(
+        "https://generativelanguage.googleapis.com/upload/v1beta/files?key=" + geminiKey,
+        {
+          method: "POST",
+          headers: {
+            "X-Goog-Upload-Protocol": "resumable",
+            "X-Goog-Upload-Command": "start",
+            "X-Goog-Upload-Header-Content-Length": String(audioBytes.length),
+            "X-Goog-Upload-Header-Content-Type": mime,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            file: { displayName: meetingId + (mime === "audio/wav" ? ".wav" : ".m4a") },
+          }),
+        }
+      );
+      if (!startRes.ok) {
+        const errText = await startRes.text();
+        throw new Error("File API start failed (" + startRes.status + "): " + errText);
+      }
+      const uploadUrl = startRes.headers.get("X-Goog-Upload-URL");
+      if (!uploadUrl) throw new Error("No upload URL returned");
+
+      // Step 2: Upload the bytes
+      const uploadRes = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Length": String(audioBytes.length),
+          "X-Goog-Upload-Offset": "0",
+          "X-Goog-Upload-Command": "upload, finalize",
+        },
+        body: audioBytes,
+      });
+      if (!uploadRes.ok) {
+        const errText = await uploadRes.text();
+        throw new Error("File upload failed (" + uploadRes.status + "): " + errText);
+      }
+      const fileInfo = await uploadRes.json();
+      fileUri = fileInfo.file?.uri;
+      if (!fileUri) throw new Error("No file URI: " + JSON.stringify(fileInfo));
+      steps.push("   Uploaded: " + fileUri);
+
+      // Step 3: Wait for file to be ACTIVE
+      const fileName = fileInfo.file?.name;
+      if (fileName) {
+        for (let i = 0; i < 30; i++) {
+          const checkRes = await fetch(
+            "https://generativelanguage.googleapis.com/v1beta/" + fileName + "?key=" + geminiKey
+          );
+          if (checkRes.ok) {
+            const checkData = await checkRes.json();
+            if (checkData.state === "ACTIVE") {
+              steps.push("   File state: ACTIVE");
+              break;
+            }
+            steps.push("   File state: " + checkData.state + " (waiting...)");
+          }
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+      }
+    } else {
+      steps.push("3. Encoding inline base64 (small file)");
+      let bin = "";
+      for (let i = 0; i < audioBytes.length; i += 8192) {
+        bin += String.fromCharCode.apply(null, Array.from(audioBytes.subarray(i, i + 8192)));
+      }
+      audioBase64 = btoa(bin);
+      steps.push("   Base64 length: " + audioBase64.length);
+    }
+
+    steps.push("4. Calling Gemini for transcription");
+    const prompt = "Transcribe this audio recording accurately. The primary language is " + lang + " (" + meeting.language_code + "). Output ONLY the transcription text. Preserve the original language. If multiple speakers, prefix with Speaker 1:, Speaker 2:, etc. If unclear or silent, output [inaudible].";
+
+    const audioPart = fileUri
+      ? { fileData: { mimeType: mime, fileUri: fileUri } }
+      : { inlineData: { mimeType: mime, data: audioBase64 } };
+
+    const genUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=" + geminiKey;
+
+    const res = await fetch(genUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{
-          parts: [
-            { inlineData: { mimeType: mime, data: audioBase64 } },
-            { text: "Transcribe this audio recording accurately. The primary language is " + lang + " (" + meeting.language_code + "). Output ONLY the transcription text. Preserve the original language. If multiple speakers, prefix with Speaker 1:, Speaker 2:, etc. If unclear or silent, output [inaudible]." },
-          ],
-        }],
-        generationConfig: { temperature: 0, maxOutputTokens: 8192 },
+        contents: [{ parts: [audioPart, { text: prompt }] }],
+        generationConfig: { temperature: 0, maxOutputTokens: 16384 },
       }),
     });
 
@@ -87,15 +161,14 @@ Deno.serve(async (req: Request) => {
     const parts = candidate && candidate.content && candidate.content.parts;
     const transcript = (parts && parts[0] && parts[0].text) || "";
     steps.push("   finishReason: " + (finishReason || "none"));
-    steps.push("   parts: " + (parts ? parts.length : 0));
     steps.push("   Chars: " + transcript.length);
     if (transcript) {
       steps.push("   Preview: " + transcript.substring(0, 200));
     } else {
-      steps.push("   Raw: " + JSON.stringify(candidate || data).substring(0, 300));
+      steps.push("   Raw: " + JSON.stringify(candidate || data).substring(0, 500));
     }
 
-    steps.push("4. Parsing");
+    steps.push("5. Parsing");
     const segments: Array<{
       meeting_id: string; speaker_label: string | null; text: string;
       start_seconds: number; end_seconds: number; confidence: number | null; language: string;
@@ -128,14 +201,25 @@ Deno.serve(async (req: Request) => {
     }
     steps.push("   Segments: " + segments.length);
 
-    steps.push("5. Saving");
+    steps.push("6. Saving");
     var insertRes = await supabase.from("transcripts").insert(segments);
     if (insertRes.error) throw new Error("Insert failed: " + insertRes.error.message);
     steps.push("   Saved");
 
-    steps.push("6. Setting status to analyzing");
+    steps.push("7. Setting status to analyzing");
     await supabase.from("meetings").update({ status: "analyzing" }).eq("id", meetingId);
     steps.push("   Status updated");
+
+    // Cleanup: delete uploaded file from Gemini if we used File API
+    if (fileUri) {
+      try {
+        const fileName = fileUri.split("/").pop();
+        await fetch(
+          "https://generativelanguage.googleapis.com/v1beta/files/" + fileName + "?key=" + geminiKey,
+          { method: "DELETE" }
+        );
+      } catch (_) { /* best effort cleanup */ }
+    }
 
     return new Response(
       JSON.stringify({ success: true, segments_count: segments.length, steps: steps }),
